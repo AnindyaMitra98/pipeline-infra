@@ -1,0 +1,22 @@
+# Copy to terraform.tfvars and fill in your own values.
+#   cp terraform.tfvars.example terraform.tfvars
+
+region       = "us-east-1"
+cluster_name = "pipeline-portfolio"
+
+# REQUIRED. Which GitLab pipelines may assume the ECR-push role.
+# Replace `your-group/pipeline-app` with the path of your mirrored GitLab
+# project. Keep it scoped to a specific project and branch — a wildcard here
+# would let other people's GitLab projects assume your AWS role.
+gitlab_allowed_subjects = [
+  "project_path:your-group/pipeline-app:ref_type:branch:ref:main"
+]
+
+# Narrow this to your own IP for anything longer-lived than a demo session:
+#   public_access_cidrs = ["203.0.113.4/32"]
+public_access_cidrs = ["0.0.0.0/0"]
+
+# SPOT roughly halves node cost; switch to ON_DEMAND if interruptions during a
+# recording session would be annoying.
+node_capacity_type = "SPOT"
+node_desired_size  = 2

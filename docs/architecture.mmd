@@ -1,0 +1,29 @@
+flowchart TB
+    dev([Developer]) -->|git push| GH[GitHub: pipeline-app<br/>source of truth]
+    GH -.->|pull mirror| GL[GitLab: mirrored project]
+
+    subgraph CI["GitLab CI pipeline"]
+      direction LR
+      T[test] --> B[build<br/>tag = git SHA] --> S[Trivy scan<br/>fail on CRITICAL] --> P[push]
+    end
+    GL --> CI
+
+    P -->|OIDC AssumeRoleWithWebIdentity<br/>no static keys| ECR[(AWS ECR<br/>sample-app)]
+
+    subgraph EKS["AWS EKS cluster"]
+      AIU[Argo Image Updater] -->|polls tags| ECR
+      AIU -->|commits values-dev.yaml| GOPS
+      ARGO[ArgoCD] -->|watches| GOPS
+      ARGO --> NSD[ns: sample-app-dev<br/>auto-sync]
+      ARGO --> NSS[ns: sample-app-staging<br/>auto-sync]
+      ARGO --> NSP[ns: sample-app-prod<br/>manual sync]
+      ESO[External Secrets Operator] -->|IRSA| SM[(AWS Secrets Manager)]
+      ESO --> NSD & NSS & NSP
+      PROM[Prometheus + Grafana]
+      PROM -.->|scrapes /metrics| NSD & NSS & NSP
+    end
+
+    GOPS[GitHub: pipeline-gitops<br/>Helm chart + values per env]
+    human([Human PR review]) -->|promote tag| GOPS
+
+    TF[Terraform: pipeline-infra] -.->|provisions| ECR & EKS & SM

@@ -1,0 +1,19 @@
+# Terraform
+# Note: .terraform.lock.hcl is deliberately NOT ignored — committing it pins
+# provider versions so everyone gets the same ones.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+
+# Contains your GitLab project path and any local overrides — keep the
+# .example committed instead.
+terraform.tfvars
+*.auto.tfvars
+
+# Saved plans can embed sensitive values
+*.tfplan
+
+.DS_Store
