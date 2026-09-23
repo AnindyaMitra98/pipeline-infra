@@ -818,10 +818,14 @@ git push
 
 Watch it move through the system:
 
-1. **GitLab pulls** (within ~1 min, or click *Update now* on the mirror page).
+1. **GitLab pulls.** This happens on GitLab's own schedule, which can take
+   several minutes. To speed it up, click *Update now* on the mirror page; the
+   button shows *Updating* while the request waits in GitLab's queue, which can
+   take a minute or two.
 2. **Pipeline runs** — `test → build → scan → push`. Watch under *Build →
-   Pipelines*. The `push` job's log shows `assume-role-with-web-identity`
-   succeeding with no stored credentials.
+   Pipelines*. In the `push` job's log, `aws sts get-caller-identity` prints an
+   `assumed-role/pipeline-portfolio-gitlab-ci/...` ARN. That line is the OIDC
+   exchange succeeding with no stored credentials.
 3. **Image lands in ECR:**
 
    ```bash
