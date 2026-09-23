@@ -158,6 +158,7 @@ infra/
   docs/
     usage.md                   step-by-step setup guide + troubleshooting
     rollback-demo.md           runbook for the demo recording
+    first-run-retrospective.md what broke on the first real run, and why
     architecture.mmd           diagram source
 ```
 
@@ -168,6 +169,11 @@ infra/
 > **[→ Full setup guide](docs/usage.md)** — every step from empty AWS account to
 > working pipeline, with verification checkpoints and troubleshooting. Start
 > there if you are actually building this. The summary below is the shape of it.
+>
+> **[→ First-run retrospective](docs/first-run-retrospective.md)** — the first
+> run against real AWS: what failed, the root causes, the fixes, and what they
+> taught. Every issue in it passed validate, plan, lint and template, and only
+> showed up on real infrastructure.
 
 **Prerequisites:** AWS account with credentials configured, plus `terraform`,
 `aws`, `kubectl`, and `helm` on PATH. A GitLab **Premium or Ultimate** group
