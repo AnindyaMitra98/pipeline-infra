@@ -128,6 +128,10 @@ Write-Step '3/4 Installing Argo Image Updater'
 # is the `<username>:<password>` format the updater expects on stdout.
 $authScript = @'
 #!/bin/sh
+# Root filesystem is read-only and HOME=/app; the AWS CLI must write a cache
+# under $HOME/.aws. Use /tmp for this script only -- the updater itself needs
+# HOME=/app for its git/SSH config.
+export HOME=/tmp
 aws ecr --region "$AWS_REGION" get-authorization-token \
   --output text --query 'authorizationData[].authorizationToken' | base64 -d
 '@

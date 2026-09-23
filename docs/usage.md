@@ -558,6 +558,11 @@ authScripts:
   scripts:
     ecr-login.sh: |
       #!/bin/sh
+      # The container's root filesystem is read-only and $HOME is /app, but
+      # the AWS CLI insists on writing a credential cache under $HOME/.aws.
+      # Point it at /tmp (an emptyDir) for this script only -- the updater
+      # itself still needs HOME=/app to find its git and SSH config.
+      export HOME=/tmp
       aws ecr --region "$AWS_REGION" get-authorization-token \
         --output text --query 'authorizationData[].authorizationToken' | base64 -d
 
@@ -612,6 +617,19 @@ kubectl get crd imageupdaters.argocd-image-updater.argoproj.io
 Since v1.0, Image Updater only acts on Applications an `ImageUpdater` resource
 selects; annotations alone do nothing. That CRD is also why Step 9 has to come
 after this step.
+
+Finally, run the ECR login script inside the pod, exactly as Image Updater
+will run it. This is the only check here that exercises the whole chain: the
+IRSA token, the role's ECR permission, and the script itself. The pipe keeps
+only the username, so the token is never printed:
+
+```bash
+kubectl exec -n argocd deploy/argocd-image-updater-controller -- sh /scripts/ecr-login.sh | cut -d: -f1
+```
+
+It should print `AWS`. If it prints nothing, or an error, Image Updater
+cannot see ECR, and dev will never update. Nothing else reports that failure
+until Step 10, where it shows up only as nothing happening.
 
 ### 6.6 Install Prometheus and Grafana
 
@@ -1070,9 +1088,16 @@ match the Application's `repoURL` exactly, `.git` suffix included.
 kubectl logs -n argocd deploy/argocd-image-updater-controller -f
 ```
 
-- `no credentials` → the ECR auth script failed; confirm the ServiceAccount
-  carries the IRSA annotation:
-  `kubectl get sa argocd-image-updater -n argocd -o yaml`
+- `no credentials` → the ECR auth script failed. Run it by hand, as in the
+  last check of [6.5](#65-install-argo-image-updater), and read the error:
+  - `Read-only file system: '/app/.aws'` → the script is missing
+    `export HOME=/tmp`. The pod's root filesystem is read-only, and the AWS
+    CLI cannot write its credential cache under `/app`.
+  - `AccessDenied` or `Unable to locate credentials` → confirm the
+    ServiceAccount carries the IRSA annotation
+    (`kubectl get sa argocd-image-updater -n argocd -o yaml`). Then
+    `kubectl rollout restart deploy/argocd-image-updater-controller -n argocd`,
+    because the pod only picks up its role when it starts.
 - `failed to push` → the GitHub token lacks `repo` scope or has expired. Update
   the `gitops-repo` Secret (6.3) or re-run `install.ps1` with a fresh token.
 - Nothing at all → first check `kubectl get imageupdaters -n argocd` lists
