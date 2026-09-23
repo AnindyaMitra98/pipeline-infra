@@ -98,8 +98,10 @@ commit you can `git log`, diff, and revert.
 
 ### dev is automated; staging and prod are gated
 
-Only the dev Application carries Image Updater annotations. That one
-configuration detail is the entire promotion model:
+Only the dev Application carries Image Updater annotations, and only dev is
+selected by the `ImageUpdater` resource that Image Updater v1.x needs before it
+will act on anything. That one configuration detail — made twice, on purpose —
+is the entire promotion model:
 
 | Environment | Moves forward when | Sync |
 |-------------|-------------------|------|
@@ -168,8 +170,9 @@ infra/
 > there if you are actually building this. The summary below is the shape of it.
 
 **Prerequisites:** AWS account with credentials configured, plus `terraform`,
-`aws`, `kubectl`, and `helm` on PATH. A GitLab account, and a GitHub token with
-`repo` scope.
+`aws`, `kubectl`, and `helm` on PATH. A GitLab **Premium or Ultimate** group
+(the 30-day Ultimate trial works; the Free tier cannot pull-mirror), and a
+GitHub token with `repo` scope.
 
 ### 1. State backend (once, ever)
 
@@ -200,8 +203,10 @@ hand. It prints the ArgoCD and Grafana passwords when it finishes.
 
 ### 4. Wire up GitLab
 
-1. Create a GitLab project and configure it as a **pull mirror** of the GitHub
-   app repo (*Settings → Repository → Mirroring*, direction **Pull**).
+1. Create a GitLab project **inside your Premium/Ultimate group** and configure
+   it as a **pull mirror** of the GitHub app repo (*Settings → Repository →
+   Mirroring*, direction **Pull**, with *Trigger pipelines for mirror updates*
+   ticked).
 2. Add these CI/CD variables — none are secrets, so none need masking:
 
    ```bash
@@ -214,13 +219,14 @@ hand. It prints the ArgoCD and Grafana passwords when it finishes.
    | `AWS_REGION` | Terraform output |
    | `ECR_REPOSITORY` | Terraform output |
 
-3. Confirm `main` is a **protected branch** — the IAM trust policy only accepts
-   tokens issued for it.
+3. Confirm `main` is a **protected branch**. The IAM trust policy pins project
+   and branch; protection is what controls who can push to that branch.
 
 ### 5. Register the Applications
 
 Replace the `<ACCOUNT_ID>` and `<GITHUB_USER>` placeholders in the GitOps repo,
-push, then:
+push, then register the three Applications and the `ImageUpdater` that selects
+dev:
 
 ```bash
 kubectl apply -f ../gitops/apps/root/

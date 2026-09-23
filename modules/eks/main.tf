@@ -53,6 +53,10 @@ module "eks" {
       instance_types = var.node_instance_types
       capacity_type  = var.node_capacity_type
 
+      # Stated explicitly rather than left to the AWS default. Amazon Linux 2
+      # has no EKS AMIs for 1.33 and later, so AL2023 is the only choice here.
+      ami_type = "AL2023_x86_64_STANDARD"
+
       min_size     = var.node_min_size
       max_size     = var.node_max_size
       desired_size = var.node_desired_size

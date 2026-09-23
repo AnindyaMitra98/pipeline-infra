@@ -62,8 +62,8 @@ hand). Roughly 35 of those are AWS waiting for EKS, so the rest is real work.
 |------|-------|-------|
 | AWS CLI v2 | `aws --version` | |
 | Terraform ≥ 1.5 | `terraform version` | |
-| kubectl | `kubectl version --client` | |
-| Helm 3 | `helm version` | |
+| kubectl | `kubectl version --client` | Within one minor version of the cluster (1.34–1.36 for the default 1.35) |
+| Helm ≥ 3.8 | `helm version` | Helm 4 works too |
 | Docker | `docker ps` | Only for local testing |
 | Node.js ≥ 20 | `node --version` | Only for local testing |
 | Git | `git --version` | |
@@ -82,7 +82,11 @@ hand). Roughly 35 of those are AWS waiting for EKS, so the rest is real work.
   Create at *Settings → Developer settings → Personal access tokens*. Argo
   Image Updater needs it to push tag commits. Save it somewhere for Step 6.
 
-- **GitLab account** (free tier is fine) at gitlab.com.
+- **GitLab account** at gitlab.com, on **Premium or Ultimate**. Step 3's pull
+  mirror is not available on the Free tier. The 30-day Ultimate trial is
+  enough — but it attaches to a **group**, not your personal namespace, so the
+  project must live inside that group. When the trial ends the group drops to
+  Free and the mirror stops syncing.
 
 ### A note on the shell
 
@@ -194,17 +198,26 @@ Do this *before* Step 4, because Step 4 needs your GitLab project path to build
 the IAM trust policy.
 
 1. On gitlab.com: **New project → Run CI/CD for external repository → GitHub**,
-   or create a blank project named `pipeline-app`.
+   or create a blank project named `pipeline-app`. Either way, create it
+   **inside the group that holds your Premium/Ultimate plan or trial** — a
+   project in your personal namespace cannot pull-mirror.
 2. Go to **Settings → Repository → Mirroring repositories**:
    - **Git repository URL:** `https://github.com/<YOUR_USER>/pipeline-app.git`
    - **Mirror direction:** **Pull**
+   - Tick **Trigger pipelines for mirror updates** — without it the mirror
+     syncs quietly and no pipeline ever runs.
    - Save, then click **Update now**.
 3. Go to **Settings → Repository → Protected branches** and confirm `main` is
-   protected. The IAM trust policy in Step 4 only accepts tokens issued for a
-   protected `main`, so CI cannot push to ECR without this.
+   protected. The IAM trust policy in Step 4 checks only project and branch —
+   AWS cannot see GitLab's "protected" flag — so branch protection is what
+   stops anyone with Developer access pushing straight to the one branch that
+   can reach ECR.
 
-Note your project path — the part after `gitlab.com/`, e.g.
-`your-username/pipeline-app`. You need it next.
+Note your project path — the part after `gitlab.com/`. Use the group's **URL
+path**, which can differ from its display name: a group shown as `My-Group`
+may live at `gitlab.com/my-group1234567`. The API shows it exactly — open
+`https://gitlab.com/api/v4/groups?min_access_level=10` while signed in and
+read `full_path`. You need it next.
 
 **Verify:** GitLab shows your app's files, and *Settings → Repository →
 Mirroring* shows a successful last-update time.
@@ -230,7 +243,10 @@ gitlab_allowed_subjects = [
 ]
 ```
 
-Use the GitLab path from Step 3. This controls which pipelines may assume your
+Use the GitLab path from Step 3, e.g.
+`project_path:my-group1234567/pipeline-app:...`. AWS compares it character for
+character, and a display name in place of the URL path is the classic reason
+the first pipeline fails to assume the role. This controls which pipelines may assume your
 AWS role — keep it scoped to one project and branch. A wildcard here would let
 any GitLab project on the internet assume your role.
 
@@ -298,6 +314,22 @@ The order matters: Image Updater registers against ArgoCD's API, and the app's
 Run the rest of this step from `infra/bootstrap` — two files there are used
 directly.
 
+Every chart is **pinned** to a version this project has been rendered against:
+
+| Chart | Version | App |
+|-------|---------|-----|
+| `argo/argo-cd` | 10.9.2 | Argo CD v3.5.3 |
+| `external-secrets/external-secrets` | 2.11.0 | ESO v2.11.0 |
+| `argo/argocd-image-updater` | 1.3.1 | Image Updater v1.3.0 |
+| `prometheus-community/kube-prometheus-stack` | 91.5.0 | Prometheus Operator v0.94.0 |
+
+That is not caution for its own sake. Unpinned, this guide has already broken
+twice: Image Updater 1.x became a controller that ignores annotations unless an
+`ImageUpdater` resource selects the Application, and External Secrets stopped
+serving the `v1beta1` API every manifest here used. Upgrade by bumping a
+version, re-rendering with `helm template`, and updating this table and
+`install.ps1` together.
+
 ### 6.0 Capture the Terraform outputs
 
 Five values get used repeatedly. Read them once into shell variables so the
@@ -359,7 +391,7 @@ helm repo update
 ### 6.2 Install ArgoCD
 
 ```bash
-helm upgrade --install argocd argo/argo-cd \
+helm upgrade --install argocd argo/argo-cd --version 10.9.2 \
   --namespace argocd --create-namespace \
   --set 'configs.params.server\.insecure=true' \
   --wait --timeout 10m
@@ -422,7 +454,7 @@ kubectl get secret gitops-repo -n argocd -o jsonpath='{.metadata.labels}'
 ### 6.4 Install External Secrets Operator
 
 ```bash
-helm upgrade --install external-secrets external-secrets/external-secrets \
+helm upgrade --install external-secrets external-secrets/external-secrets --version 2.11.0 \
   --namespace external-secrets --create-namespace \
   --set installCRDs=true \
   --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$ESO_ROLE" \
@@ -506,8 +538,8 @@ authScripts:
 
 config:
   # Identity on the tag-bump commits Image Updater pushes to the GitOps repo.
-  gitCommitUser: argocd-image-updater
-  gitCommitMail: argocd-image-updater@noreply.local
+  git.user: argocd-image-updater
+  git.email: argocd-image-updater@noreply.local
   registries:
     - name: ECR
       api_url: https://<ECR_REGISTRY>
@@ -523,7 +555,7 @@ Render it before installing — this catches indentation mistakes in the embedde
 script without waiting for a `CrashLoopBackOff`:
 
 ```bash
-helm template argocd-image-updater argo/argocd-image-updater \
+helm template argocd-image-updater argo/argocd-image-updater --version 1.3.1 \
   -n argocd -f image-updater-values.yaml | head -40
 ```
 
@@ -531,7 +563,7 @@ You should see your role ARN on the ServiceAccount and the `ecr-login.sh` key
 inside the ConfigMap. Then install:
 
 ```bash
-helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+helm upgrade --install argocd-image-updater argo/argocd-image-updater --version 1.3.1 \
   --namespace argocd \
   --values image-updater-values.yaml \
   --wait --timeout 10m
@@ -541,16 +573,25 @@ helm upgrade --install argocd-image-updater argo/argocd-image-updater \
 
 ```bash
 kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-image-updater
-kubectl logs -n argocd deploy/argocd-image-updater | head -20
+kubectl logs -n argocd deploy/argocd-image-updater-controller | head -20
 ```
 
-The log should show it starting and finding **0** applications to consider —
-correct, because the Applications do not exist until Step 9.
+The log should show the controller starting with nothing to do — correct,
+because the `ImageUpdater` resource that tells it about dev does not exist
+until Step 9. Confirm the chart installed that resource type:
+
+```bash
+kubectl get crd imageupdaters.argocd-image-updater.argoproj.io
+```
+
+Since v1.0, Image Updater only acts on Applications an `ImageUpdater` resource
+selects; annotations alone do nothing. That CRD is also why Step 9 has to come
+after this step.
 
 ### 6.6 Install Prometheus and Grafana
 
 ```bash
-helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack --version 91.5.0 \
   --namespace monitoring --create-namespace \
   --set grafana.persistence.enabled=false \
   --set prometheus.prometheusSpec.retention=6h \
@@ -602,11 +643,16 @@ separate windows:
 
 ```bash
 kubectl port-forward svc/argocd-server -n argocd 8081:443
-#   https://localhost:8081   admin / <argocd password>
+#   http://localhost:8081    admin / <argocd password>
 
 kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
 #   http://localhost:3000    admin / <grafana password>
 ```
+
+ArgoCD's URL is plain **`http`**, even though the Service port is 443:
+`server.insecure=true` (6.2) means the server speaks only HTTP, so an
+`https://` URL fails the TLS handshake. The port-forward tunnel is already
+encrypted, so nothing crosses the network in the clear.
 
 **Step 6 is done when all four of these look right:**
 
@@ -662,7 +708,7 @@ In your **`pipeline-gitops`** clone:
 |------|---------|------|
 | `charts/sample-app/values.yaml` | `<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/sample-app` | the full URL above |
 | `apps/root/dev-app.yaml` | `<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/sample-app` | the full URL above |
-| `apps/root/*.yaml` (all three) | `<GITHUB_USER>` | your GitHub username |
+| `apps/root/*-app.yaml` (all three) | `<GITHUB_USER>` | your GitHub username |
 
 The registry host in `dev-app.yaml`'s `image-list` annotation must match
 `values.yaml`'s `image.repository` **character for character** — Image Updater
@@ -697,16 +743,19 @@ From your `pipeline-gitops` clone:
 kubectl apply -f apps/root/
 ```
 
-Three Applications, one per environment. Their namespaces are created by ArgoCD
-itself (`CreateNamespace=true`), so there is nothing to create first.
+Three Applications, one per environment, plus one `ImageUpdater` resource
+(`dev-image-updater.yaml`) that points Argo Image Updater at `sample-app-dev`
+and nothing else. The Applications' namespaces are created by ArgoCD itself
+(`CreateNamespace=true`), so there is nothing to create first.
 
 **Verify:**
 
 ```bash
 kubectl get applications -n argocd
+kubectl get imageupdaters -n argocd
 ```
 
-Three Applications listed. Expect dev and staging to be **Degraded** and prod
+Three Applications and one ImageUpdater listed. Expect dev and staging to be **Degraded** and prod
 **Missing** — the `REPLACE_ME` image tag does not exist yet. That is correct at
 this stage; Step 10 fixes it.
 
@@ -744,7 +793,7 @@ Watch it move through the system:
    To watch it decide rather than waiting blind:
 
    ```bash
-   kubectl logs -n argocd deploy/argocd-image-updater -f
+   kubectl logs -n argocd deploy/argocd-image-updater-controller -f
    ```
 
 5. **ArgoCD syncs.** dev goes **Healthy**.
@@ -993,7 +1042,7 @@ match the Application's `repoURL` exactly, `.git` suffix included.
 **Image Updater is not picking up new images**
 
 ```bash
-kubectl logs -n argocd deploy/argocd-image-updater -f
+kubectl logs -n argocd deploy/argocd-image-updater-controller -f
 ```
 
 - `no credentials` → the ECR auth script failed; confirm the ServiceAccount
@@ -1001,7 +1050,9 @@ kubectl logs -n argocd deploy/argocd-image-updater -f
   `kubectl get sa argocd-image-updater -n argocd -o yaml`
 - `failed to push` → the GitHub token lacks `repo` scope or has expired. Update
   the `gitops-repo` Secret (6.3) or re-run `install.ps1` with a fresh token.
-- Nothing at all → the `image-list` annotation's registry host must match the
+- Nothing at all → first check `kubectl get imageupdaters -n argocd` lists
+  `sample-app-dev`; without it Image Updater v1.x ignores the annotations
+  entirely. Then check the `image-list` annotation's registry host matches the
   ECR URL exactly.
 
 **Image Updater pod is `CrashLoopBackOff` right after install**
@@ -1031,6 +1082,13 @@ held out of service, not restart-looped.
 You skipped the cleanup in [12.1–12.3](#step-12--tearing-down). Ctrl-C, work
 through those, then destroy again. If a load balancer is truly stuck, delete it
 in the EC2 console (*Load Balancers*), wait for its ENIs to clear, and retry.
+
+**`no matches for kind "ClusterSecretStore" in version "external-secrets.io/v1beta1"`**
+
+A manifest is using the old API. ESO 0.17 and later serve only
+`external-secrets.io/v1` by default, and everything in these repos uses `v1`.
+Seeing this means an old copy of a manifest, or a new one written from an old
+tutorial.
 
 **`ClusterSecretStore` is not `Valid`**
 

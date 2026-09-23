@@ -40,6 +40,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Chart versions are pinned. These charts move fast and have broken this
+# project before: Image Updater 1.x became a CRD-driven controller, and External
+# Secrets 0.17+ stopped serving the v1beta1 API. Bump deliberately, re-render
+# with `helm template`, and keep docs/usage.md in step.
+$ArgoCdChartVersion          = '10.9.2'    # Argo CD v3.5.3
+$ExternalSecretsChartVersion = '2.11.0'    # ESO v2.11.0
+$ImageUpdaterChartVersion    = '1.3.1'     # Image Updater v1.3.0
+$PrometheusStackChartVersion = '91.5.0'
+
 $tfDir = Join-Path $PSScriptRoot '..\envs\cluster'
 
 function Write-Step { param([string]$Message) Write-Host "`n=== $Message ===" -ForegroundColor Cyan }
@@ -77,6 +87,7 @@ helm repo update | Out-Null
 
 Write-Step '1/4 Installing ArgoCD'
 helm upgrade --install argocd argo/argo-cd `
+    --version $ArgoCdChartVersion `
     --namespace argocd --create-namespace `
     --set 'configs.params.server\.insecure=true' `
     --wait --timeout 10m
@@ -98,6 +109,7 @@ kubectl label secret gitops-repo -n argocd 'argocd.argoproj.io/secret-type=repos
 
 Write-Step '2/4 Installing External Secrets Operator'
 helm upgrade --install external-secrets external-secrets/external-secrets `
+    --version $ExternalSecretsChartVersion `
     --namespace external-secrets --create-namespace `
     --set installCRDs=true `
     --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$externalSecretsRole" `
@@ -134,8 +146,8 @@ authScripts:
 $($authScript -split "`n" | ForEach-Object { "      $_" } | Out-String)
 config:
   # Identity on the tag-bump commits Image Updater pushes to the GitOps repo.
-  gitCommitUser: $GitAuthorName
-  gitCommitMail: $GitAuthorEmail
+  git.user: $GitAuthorName
+  git.email: $GitAuthorEmail
   registries:
     - name: ECR
       api_url: https://$ecrRegistry
@@ -151,6 +163,7 @@ $valuesPath = Join-Path $env:TEMP 'image-updater-values.yaml'
 $imageUpdaterValues | Set-Content -Path $valuesPath -Encoding utf8
 
 helm upgrade --install argocd-image-updater argo/argocd-image-updater `
+    --version $ImageUpdaterChartVersion `
     --namespace argocd `
     --values $valuesPath `
     --wait --timeout 10m
@@ -163,6 +176,7 @@ Write-Step '4/4 Installing kube-prometheus-stack'
 # Storage is deliberately ephemeral: nothing here needs to survive a teardown,
 # and skipping PVCs removes the EBS-volume cleanup lag from `terraform destroy`.
 helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack `
+    --version $PrometheusStackChartVersion `
     --namespace monitoring --create-namespace `
     --set grafana.persistence.enabled=false `
     --set prometheus.prometheusSpec.retention=6h `
@@ -191,12 +205,13 @@ Next steps
      apps/root/*.yaml                <GITHUB_USER>    -> $GitHubUser
                                      <ACCOUNT_ID>...  -> $ecrRegistry
 
-2. Register the three Applications with ArgoCD:
+2. Register the three Applications, and the ImageUpdater that selects dev:
      kubectl apply -f ../../gitops/apps/root/
 
 3. Open the UIs (each blocks the terminal; use separate windows):
      kubectl port-forward svc/argocd-server -n argocd 8081:443
-       https://localhost:8081   admin / $argoPassword
+       http://localhost:8081    admin / $argoPassword
+       (plain http: server.insecure is on, and the tunnel is already encrypted)
 
      kubectl port-forward svc/kube-prometheus-stack-grafana -n monitoring 3000:80
        http://localhost:3000    admin / $grafanaPassword
