@@ -312,7 +312,7 @@ broken.
 
 | Item | Why |
 |---|---|
-| Dockerfile `USER nonroot` → `USER 65532` | Makes the image valid under any non-root policy, not just this chart. It also works as a rehearsal second deploy |
+| ~~Dockerfile `USER nonroot` → `USER 65532`~~ **Done** (app `d90679e`) | Makes the image valid under any non-root policy, not just this chart. It ships with the next pipeline run |
 | Promote staging through a PR next time | `538dba1` went straight to `main`, so the review step was skipped |
 | Consider `node_desired_size = 3` for long demos | 30/34 pod slots, one node at 16/17. Costs about +$0.016/hr |
 | Consider an app-of-apps for `apps/root/` | Removes the manual re-apply when Application manifests change |
