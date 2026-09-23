@@ -1,21 +1,23 @@
 # Remote state backend.
 #
-# The bucket name is not known until ../../bootstrap-state has been applied
-# (it carries a random suffix for global uniqueness), so this block ships
-# commented out. Until you uncomment it, Terraform uses local state — which
-# works fine for a solo run but loses the locking and versioning story.
+# The bucket and lock table are created by ../../bootstrap-state, which is
+# applied once and lives outside the spin-up/spin-down cycle. The bucket name
+# carries a random suffix for global uniqueness; it is not a secret, so it is
+# committed here like any other configuration.
 #
-# To enable it:
-#   1. cd ../../bootstrap-state && terraform apply
-#   2. terraform output -raw backend_config   # prints the exact block below
-#   3. paste it here, uncomment, then run `terraform init -migrate-state`
+# Versioning on the bucket means every apply leaves a recoverable copy of the
+# state; the DynamoDB table stops two applies racing each other.
+#
+# Forking this project? Apply ../../bootstrap-state yourself, then replace this
+# block with the output of `terraform output -raw backend_config` and run
+# `terraform init -migrate-state`.
 
-# terraform {
-#   backend "s3" {
-#     bucket         = "pipeline-portfolio-tfstate-xxxxxx"
-#     key            = "cluster/terraform.tfstate"
-#     region         = "us-east-1"
-#     dynamodb_table = "pipeline-portfolio-tf-locks"
-#     encrypt        = true
-#   }
-# }
+terraform {
+  backend "s3" {
+    bucket         = "pipeline-portfolio-tfstate-qnuaq0"
+    key            = "cluster/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "pipeline-portfolio-tf-locks"
+    encrypt        = true
+  }
+}
