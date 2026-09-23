@@ -351,22 +351,35 @@ ECR_REGISTRY=${ECR_URL%%/*}          # registry host, minus the /sample-app
 
 ```powershell
 $TF = "../envs/cluster"
-$REGION             = terraform -chdir=$TF output -raw region
-$CLUSTER_NAME       = terraform -chdir=$TF output -raw cluster_name
-$ECR_URL            = terraform -chdir=$TF output -raw ecr_repository_url
-$IMAGE_UPDATER_ROLE = terraform -chdir=$TF output -raw image_updater_role_arn
-$ESO_ROLE           = terraform -chdir=$TF output -raw external_secrets_role_arn
+$REGION             = terraform "-chdir=$TF" output -raw region
+$CLUSTER_NAME       = terraform "-chdir=$TF" output -raw cluster_name
+$ECR_URL            = terraform "-chdir=$TF" output -raw ecr_repository_url
+$IMAGE_UPDATER_ROLE = terraform "-chdir=$TF" output -raw image_updater_role_arn
+$ESO_ROLE           = terraform "-chdir=$TF" output -raw external_secrets_role_arn
 $ECR_REGISTRY       = $ECR_URL.Split('/')[0]
 ```
 
-**Verify** — print them and eyeball the account ID and region:
+The quotes around `"-chdir=$TF"` are required. PowerShell does not expand a
+variable inside a bare argument that starts with `-`, so an unquoted
+`-chdir=$TF` hands Terraform the literal text `$TF` and every variable comes
+back empty.
+
+**Verify.** Print them and check the account ID and region. The brackets
+make an empty value obvious:
 
 ```bash
-echo $CLUSTER_NAME $REGION
-echo $ECR_REGISTRY
-echo $IMAGE_UPDATER_ROLE
-echo $ESO_ROLE
+echo "REGION=[$REGION] CLUSTER_NAME=[$CLUSTER_NAME]"
+echo "ECR_REGISTRY=[$ECR_REGISTRY]"
+echo "IMAGE_UPDATER_ROLE=[$IMAGE_UPDATER_ROLE]"
+echo "ESO_ROLE=[$ESO_ROLE]"
 ```
+
+**Stop here if any of them print `[]`.** The later commands do not fail on an
+empty value. They succeed and quietly install the wrong thing: a
+ServiceAccount with a blank IAM role, or a ClusterSecretStore with no region.
+The usual cause is running this from a folder other than `infra/bootstrap`.
+Opening a new terminal also clears the variables, so re-run this block in each
+new window.
 
 Then make sure kubectl is aimed at the right cluster before installing
 anything into it:
@@ -468,6 +481,18 @@ That one annotation is the entire IRSA mechanism. EKS sees it on the
 ServiceAccount, projects a signed token into the pod, and the AWS SDK trades
 that token for credentials scoped to `pipeline-app/*` in Secrets Manager.
 Nothing else is configured, and no AWS key exists anywhere in the cluster.
+
+Confirm the annotation actually landed. An empty `$ESO_ROLE` still installs
+cleanly, just with no role:
+
+```bash
+kubectl get sa external-secrets -n external-secrets -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+```
+
+If this printed nothing, re-run the `helm upgrade` above with `$ESO_ROLE` set.
+Then run `kubectl rollout restart deploy -n external-secrets`. EKS injects the
+role into a pod only when the pod starts, so fixing the annotation does
+nothing for pods that are already running.
 
 Now create the `ClusterSecretStore`. The manifest in this folder carries a
 `${AWS_REGION}` placeholder so the region is not hardcoded in a public repo —
