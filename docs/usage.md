@@ -1051,6 +1051,14 @@ Steps 4, 5, 6, 9 — about 25 minutes. Steps 1–3, 7 and 8 are one-time.
 
 ## Troubleshooting
 
+**GitLab pipeline fails instantly, no jobs run: "Verify your identity to run this pipeline"**
+
+GitLab.com's anti-abuse check. A new account has to verify with a phone or a
+card before it can use the shared runners, and this is separate from the
+verification at sign-up. It happens on the first pipeline, so it surfaces
+in Step 10. Follow *Verify identity* on the pipeline page, then *Build →
+Pipelines → Run pipeline* on `main`. No new commit is needed.
+
 **GitLab pipeline: `Not authorized to perform sts:AssumeRoleWithWebIdentity`**
 
 The trust policy's subject does not match your pipeline. Check that
