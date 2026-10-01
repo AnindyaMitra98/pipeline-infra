@@ -18,7 +18,7 @@ of the first time it was actually followed.
 | **AWS cost** | About **$0.70**, for roughly 3 hours at ~$0.25/hr |
 | **Resources** | 70 created, 70 destroyed, 0 left in state, no orphaned billables |
 | **Issues found** | 4 in the pre-apply review, 1 while testing against a local k3s cluster, 7 during the real run, and 1 operator slip. All fixed and pushed except the slip, which needed no code change |
-| **Left running** | The S3 state bucket and DynamoDB lock table (pennies a month), the GitLab project, and the GitHub repos |
+| **Left running** | The S3 state bucket and DynamoDB lock table (pennies a month), the GitLab project, and the GitHub repos. The bucket and table were later deleted on 2026-10-02 (see [section 8](#8-spinning-back-up)) |
 
 ---
 
@@ -323,8 +323,20 @@ broken.
 
 ## 8. Spinning back up
 
+**2026-10-02: the state backend was deleted** to shelve the project, following
+[usage.md 12.6](usage.md#126-optional-delete-the-state-backend). The cluster
+state was confirmed empty first: the latest version tracked 0 resources. Then
+all 12 versions of `cluster/terraform.tfstate`, the bucket
+`pipeline-portfolio-tfstate-qnuaq0`, the lock table, and the local
+`bootstrap-state` state file were removed. Nothing from this project is left
+in AWS. The GitLab project and GitHub repos remain.
+
 About 25 minutes plus one pipeline run:
 
+0. **Recreate the backend** (Step 2): apply `infra/bootstrap-state`, paste the
+   new `backend_config` into `envs/cluster/backend.tf` and commit it, then
+   `terraform -chdir=infra/envs/cluster init -reconfigure`. Use
+   `-reconfigure`, not `-migrate-state`, because the old bucket is gone.
 1. `terraform -chdir=infra/envs/cluster apply` (Step 4). Update
    `public_access_cidrs` first if your IP has changed.
 2. `aws eks update-kubeconfig ...` (Step 5).

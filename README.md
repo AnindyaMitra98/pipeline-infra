@@ -293,6 +293,9 @@ deletes the Kubernetes objects and then *polls AWS* until the load balancers and
 their ENIs are genuinely gone, because that teardown is asynchronous.
 
 The state bucket from step 1 is deliberately outside this cycle and survives.
+Deleting it too is a manual, optional step for shelving the project, and the
+next spin-up then starts from step 1 again. See
+[usage.md 12.6](docs/usage.md#126-optional-delete-the-state-backend).
 
 Rough timings: apply ~20 min, platform install ~5 min, destroy ~15 min.
 

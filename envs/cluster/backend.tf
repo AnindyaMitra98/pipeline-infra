@@ -11,6 +11,10 @@
 # Forking this project? Apply ../../bootstrap-state yourself, then replace this
 # block with the output of `terraform output -raw backend_config` and run
 # `terraform init -migrate-state`.
+#
+# The bucket and table named below were deleted on 2026-10-02 to shelve the
+# project (docs/usage.md 12.6). The next spin-up re-applies bootstrap-state,
+# pastes the new block here, and runs `init -reconfigure`.
 
 terraform {
   backend "s3" {

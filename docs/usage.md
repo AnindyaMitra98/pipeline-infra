@@ -50,6 +50,7 @@ hand). Roughly 35 of those are AWS waiting for EKS, so the rest is real work.
   - [12.3 Wait for AWS to release the NLBs and ENIs](#123-wait-for-aws-to-release-the-nlbs-and-enis)
   - [12.4 Destroy the infrastructure](#124-destroy-the-infrastructure)
   - [12.5 Confirm nothing is still billing](#125-confirm-nothing-is-still-billing)
+  - [12.6 Optional: delete the state backend](#126-optional-delete-the-state-backend)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -159,7 +160,8 @@ This is separate from everything else because state has to exist *before*
 anything can use it as a backend.
 
 **You run this once, ever.** It is not part of the spin-up/teardown cycle and
-survives `terraform destroy`.
+survives `terraform destroy`. The exception is if you deliberately deleted the
+backend in [12.6](#126-optional-delete-the-state-backend); then run it again.
 
 ```bash
 cd infra/bootstrap-state
@@ -1045,11 +1047,75 @@ All three should come back empty. Everything is tagged
 next day.
 
 The **state bucket from Step 2 survives** — it is outside this cycle. Deleting
-it is a deliberate manual choice (it has `prevent_destroy` set).
+it is a deliberate manual choice (it has `prevent_destroy` set), covered in
+12.6.
+
+### 12.6 Optional: delete the state backend
+
+Only for shelving the project for a long time. The bucket and lock table cost
+pennies a month, and deleting them means the next spin-up starts at Step 2
+instead of Step 4.
+
+First confirm the cluster state is empty. If this prints anything other than
+`0`, stop: the bucket is the only record of live resources.
+
+```bash
+aws s3 cp s3://<STATE_BUCKET>/cluster/terraform.tfstate - | grep -c '"type"'
+```
+
+`terraform destroy` in `bootstrap-state` cannot do this. `prevent_destroy`
+refuses, and even without it a versioned bucket must be emptied of every
+*version* first. That is not the same as `aws s3 rm --recursive`, which only
+adds delete markers. Use the CLI.
+
+PowerShell:
+
+```powershell
+$b = '<STATE_BUCKET>'
+
+# Every object version. Out-File -Encoding ascii, not '>': PowerShell 5.1's
+# '>' writes UTF-16, which delete-objects cannot parse.
+aws s3api list-object-versions --bucket $b --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json |
+  Out-File -Encoding ascii "$env:TEMP\tfstate-versions.json"
+aws s3api delete-objects --bucket $b --delete "file://$env:TEMP/tfstate-versions.json"
+
+# Should print "0  0" (versions, delete markers)
+aws s3api list-object-versions --bucket $b --query '[length(Versions || `[]`), length(DeleteMarkers || `[]`)]' --output text
+
+aws s3api delete-bucket --bucket $b --region us-east-1
+aws dynamodb delete-table --table-name pipeline-portfolio-tf-locks --region us-east-1
+```
+
+If the delete-marker count is not 0, list them the same way with
+`DeleteMarkers[]` in place of `Versions[]` and delete those too.
+
+Then delete `infra/bootstrap-state/terraform.tfstate` (and its `.backup`). It
+now describes resources that no longer exist, and the next `apply` there would
+fail trying to refresh them.
+
+**Verify:** both of these should fail, with `404 Not Found` and
+`ResourceNotFoundException`.
+
+```bash
+aws s3api head-bucket --bucket <STATE_BUCKET>
+aws dynamodb describe-table --table-name pipeline-portfolio-tf-locks --region us-east-1
+```
+
+`envs/cluster/backend.tf` still names the old bucket. Leave it; Step 2
+replaces it on the way back up.
 
 ### Spinning back up
 
 Steps 4, 5, 6, 9 — about 25 minutes. Steps 1–3, 7 and 8 are one-time.
+
+**If you deleted the backend (12.6),** run Step 2 first. The new bucket gets a
+new random suffix, so paste the new block into `envs/cluster/backend.tf` and
+commit it. Then initialise with `-reconfigure`, not `-migrate-state`: there is
+no old state to move, and the old bucket no longer exists to read from.
+
+```bash
+terraform -chdir=infra/envs/cluster init -reconfigure
+```
 
 ---
 
